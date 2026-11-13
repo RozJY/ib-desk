@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>IB 做市练习台</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one working screen. Client chat is the centre column; market + exchange ticket on the left, book + fills on the right; scorecard opens below when a session ends. */
+:root{
+  --bg:#eef1f5; --panel:#ffffff; --ink:#131a26; --muted:#5b6678; --line:#d5dbe5; --chip:#e4e9f1;
+  --accent:#1f5fd1; --on-accent:#ffffff;
+  --up:#0b7f57; --down:#c2362c; --warn:#a86200; --on-sem:#ffffff;
+  --sans:"IBM Plex Sans","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f141c; --panel:#171e29; --ink:#e6ebf3; --muted:#93a0b4; --line:#2a3443; --chip:#222c3a;
+  --accent:#6ea3ff; --on-accent:#0b1220;
+  --up:#3fcf98; --down:#ff7468; --warn:#f0b24a; --on-sem:#0b1220; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0f141c; --panel:#171e29; --ink:#e6ebf3; --muted:#93a0b4; --line:#2a3443; --chip:#222c3a;
+  --accent:#6ea3ff; --on-accent:#0b1220;
+  --up:#3fcf98; --down:#ff7468; --warn:#f0b24a; --on-sem:#0b1220; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+.app{max-width:1280px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+h1{font-size:20px;font-weight:600;margin:0;letter-spacing:.01em}
+h2{font-size:12px;font-weight:600;margin:0;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px}
+.brand{flex:1 1 220px;min-width:0}
+.brand p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.modes{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.modes button{border:0;background:transparent;padding:8px 14px;font-weight:500;color:var(--muted)}
+.modes button[aria-selected="true"]{background:var(--accent);color:var(--on-accent)}
+.modes button:disabled{cursor:not-allowed;opacity:.55}
+.run{display:flex;align-items:center;gap:10px}
+#clock{font-family:var(--mono);font-size:20px;font-weight:600;min-width:5.5ch;text-align:right}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:8px 16px;font-weight:600}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.modeNote{margin:0;color:var(--muted);font-size:13px}
+
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.kpi{background:var(--panel);padding:10px 12px;min-width:0}
+.kpi span{display:block;font-size:11px;color:var(--muted);letter-spacing:.04em}
+.kpi b{font-family:var(--mono);font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pos{color:var(--up)} .neg{color:var(--down)}
+
+.news{border:1px solid var(--warn);border-radius:8px;padding:8px 12px;background:var(--panel);font-weight:500}
+.news b{color:var(--warn);margin-right:8px;font-size:12px;letter-spacing:.06em}
+
+.grid{display:grid;grid-template-columns:320px minmax(0,1fr) 340px;gap:14px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.chat{grid-column:2;grid-row:1}
+.mkt{grid-column:1;grid-row:1}
+.book{grid-column:3;grid-row:1}
+.off{opacity:.45;pointer-events:none}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-size:11px;font-weight:500;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:6px;text-align:right;border-bottom:1px solid var(--line);font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td:first-child{font-family:var(--sans);font-weight:600}
+tr:last-child td{border-bottom:0}
+#mktBody tr{cursor:pointer}
+#mktBody tr.sel td{background:var(--chip)}
+.scroll{overflow-x:auto}
+
+.stream{height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px}
+.msg{max-width:88%;padding:7px 10px;border-radius:8px;font-size:13px;overflow-wrap:anywhere}
+.msg small{display:block;font-size:11px;color:var(--muted)}
+.msg.client{align-self:flex-start;background:var(--chip)}
+.msg.me{align-self:flex-end;border:1px solid var(--accent);font-family:var(--mono)}
+.msg.sys{align-self:stretch;max-width:100%;color:var(--muted);border:1px dashed var(--line);font-size:12px}
+.msg.newsm{align-self:stretch;max-width:100%;border:1px solid var(--warn);font-weight:500}
+
+.quote{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:8px}
+.rfqLine{display:flex;justify-content:space-between;gap:10px;font-weight:600}
+.bar{height:5px;background:var(--chip);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:100%;background:var(--accent)}
+.bar i.late{background:var(--down)}
+.qrow{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:3px;flex:1 1 90px;min-width:0}
+.fld label{font-size:11px;color:var(--muted)}
+input[type=text],select{width:100%;font-family:var(--mono);font-size:16px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.aid{font-size:12px;color:var(--muted);min-height:18px}
+.aid b{color:var(--ink);font-family:var(--mono);font-weight:500}
+.err{color:var(--down);font-size:12px;min-height:18px}
+
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips button{border:1px solid var(--line);background:var(--chip);border-radius:999px;padding:3px 10px;font-size:12px;font-family:var(--mono)}
+.sides{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sides button{border:0;border-radius:8px;padding:10px 6px;font-weight:600;color:var(--on-sem)}
+.buy{background:var(--up)} .sell{background:var(--down)}
+.hint{font-size:12px;color:var(--muted);min-height:18px}
+.log{height:150px;overflow-y:auto;font-family:var(--mono);font-size:12px;display:flex;flex-direction:column;gap:3px;color:var(--muted)}
+.log div b{color:var(--ink);font-weight:500}
+
+.scoreHead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px}
+.scoreHead h3{margin:0;font-size:17px}
+.srow{display:grid;grid-template-columns:150px 52px minmax(0,1fr);gap:4px 12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.srow .nm{font-weight:600}
+.srow .sc{font-family:var(--mono);font-weight:600;text-align:right}
+.srow .tip{grid-column:1/-1;color:var(--muted);font-size:12.5px}
+.meter{height:6px;background:var(--chip);border-radius:3px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--accent)}
+.decomp{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.decomp div{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.decomp span{display:block;font-size:11px;color:var(--muted)}
+.decomp b{font-family:var(--mono);font-weight:600}
+.tag{font-family:var(--sans);font-size:11px;padding:1px 7px;border-radius:999px;background:var(--chip)}
+.tag.w{color:var(--up)} .tag.l{color:var(--muted)} .tag.e{color:var(--down)}
+
+details.settings{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+details.settings summary{cursor:pointer;font-weight:600}
+.setGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:12px}
+.setGrid .chk{display:flex;align-items:center;gap:8px;align-self:end;padding-bottom:8px}
+.fine{color:var(--muted);font-size:12px;margin:10px 0 0;max-width:70ch}
+
+@media (max-width:1020px){
+  .grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .chat{grid-column:1/-1;grid-row:1} .mkt{grid-column:1;grid-row:2} .book{grid-column:2;grid-row:2}
+  .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media (max-width:640px){
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .chat,.mkt,.book{grid-column:1;grid-row:auto}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .srow{grid-template-columns:minmax(0,1fr) 52px}
+  .srow .meter{grid-column:1/-1}
+  .modes button{padding:8px 10px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1>IB 做市练习台</h1>
+      <p>报双边价，赢客户单，拆单对冲</p>
+    </div>
+    <div class="modes" role="tablist" aria-label="练习模式">
+      <button role="tab" id="mDrill" data-mode="drill" aria-selected="false">报价速算</button>
+      <button role="tab" id="mHedge" data-mode="hedge" aria-selected="false">对冲练习</button>
+      <button role="tab" id="mFull" data-mode="full" aria-selected="true">完整模拟</button>
+    </div>
+    <div class="run">
+      <span id="clock">10:00</span>
+      <button class="btn primary" id="startBtn">开始</button>
+      <button class="btn" id="endBtn" hidden>结束并评分</button>
+    </div>
+  </header>
+  <p class="modeNote" id="modeNote"></p>
+
+  <section class="kpis" aria-label="实时指标">
+    <div class="kpi"><span>佣金</span><b id="kComm">$0</b></div>
+    <div class="kpi"><span>PnL</span><b id="kPnl">$0</b></div>
+    <div class="kpi"><span>净结果 = 佣金 + PnL</span><b id="kNet">$0</b></div>
+    <div class="kpi"><span>成交 / 询价</span><b id="kCt">0 / 0</b></div>
+    <div class="kpi"><span>报价失误</span><b id="kFf">0</b></div>
+    <div class="kpi"><span>未平敞口（股）</span><b id="kExp">0</b></div>
+  </section>
+
+  <div class="news" id="news" hidden><b>NEWS</b><span id="newsTxt"></span></div>
+
+  <main class="grid">
+    <section class="panel chat" aria-label="客户聊天">
+      <h2>客户聊天</h2>
+      <div class="stream" id="stream"></div>
+      <div class="quote" id="quoteBox">
+        <div class="rfqLine"><span id="rfqTitle">等待客户询价</span><span class="num" id="rfqLeft"></span></div>
+        <div class="bar"><i id="rfqBar"></i></div>
+        <div class="qrow">
+          <div class="fld"><label for="bidIn">Bid（你买入）</label><input type="text" inputmode="decimal" id="bidIn" autocomplete="off" disabled></div>
+          <div class="fld"><label for="askIn">Ask（你卖出）</label><input type="text" inputmode="decimal" id="askIn" autocomplete="off" disabled></div>
+          <button class="btn primary" id="sendBtn" disabled>发送报价</button>
+        </div>
+        <div class="aid" id="queueLine"></div>
+        <div class="aid" id="aid"></div>
+        <div class="err" id="qErr"></div>
+      </div>
+    </section>
+
+    <section class="panel mkt" id="mktPanel" aria-label="行情与交易所">
+      <h2>交易所行情 · <span id="mktCap">市价</span></h2>
+      <table>
+        <thead><tr><th>股票</th><th>Bid</th><th>Ask</th><th>价差</th><th>持仓</th></tr></thead>
+        <tbody id="mktBody"></tbody>
+      </table>
+      <div id="ticket" style="display:flex;flex-direction:column;gap:8px">
+        <h2>交易所下单 · <span id="selName">AAA</span></h2>
+        <div class="hint" id="posHint"></div>
+        <div class="fld"><label for="qtyIn">数量（股，市价成交）</label><input type="text" inputmode="numeric" id="qtyIn" autocomplete="off" value="" placeholder="留空显示市价"></div>
+        <div class="chips" id="qtyChips">
+          <button data-q="500">500</button><button data-q="1000">1,000</button><button data-q="2000">2,000</button><button data-q="q4">持仓的 1/4</button><button data-q="all">全部持仓</button>
+        </div>
+        <div class="sides">
+          <button class="buy" id="buyBtn">买入 @ Ask</button>
+          <button class="sell" id="sellBtn">卖出 @ Bid</button>
+        </div>
+        <div class="hint" id="estHint"></div>
+        <div class="err" id="xErr"></div>
+      </div>
+    </section>
+
+    <section class="panel book" aria-label="持仓与成交">
+      <h2>持仓与盈亏</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>股票</th><th>持仓</th><th>均价</th><th>盈亏</th></tr></thead>
+        <tbody id="bookBody"></tbody>
+      </table></div>
+      <h2>成交记录</h2>
+      <div class="log" id="log"></div>
+    </section>
+  </main>
+
+  <section class="panel" id="score" hidden aria-label="评分"></section>
+
+  <details class="settings">
+    <summary>参数设置</summary>
+    <div class="setGrid">
+      <div class="fld"><label for="sComm">佣金（成交金额的 bps）</label><input type="text" inputmode="decimal" id="sComm" value="25"></div>
+      <div class="fld"><label for="sSpread">市价价差基准（bps）</label><input type="text" inputmode="decimal" id="sSpread" value="60"></div>
+      <div class="fld"><label for="sImpact">每 1,000 股单边加宽（bps）</label><input type="text" inputmode="decimal" id="sImpact" value="65"></div>
+      <div class="fld"><label for="sLim">完整模拟报价时限（秒）</label><input type="text" inputmode="numeric" id="sLim" value="60"></div>
+      <div class="fld"><label for="sVol">股价波动（每秒 bps）</label><input type="text" inputmode="decimal" id="sVol" value="8"></div>
+      <div class="fld"><label for="sDur">完整模拟时长</label><select id="sDur"><option value="300">5 分钟</option><option value="600" selected>10 分钟</option><option value="900">15 分钟</option><option value="1200">20 分钟</option><option value="1800">30 分钟</option></select></div>
+      <label class="chk"><input type="checkbox" id="sAid" checked> 显示辅助提示（Mid、参考报价、预计成交价）</label>
+    </div>
+    <p class="fine">参数在下一次点“开始”时生效。股价波动按体量系数缩放，并带有短期趋势，体量小的股票涨跌更大。1 bps = 0.01%。某只股票某个数量的价差 =（市价价差基准 + 2 × 每千股加宽 × 千股数）× 体量系数。体量系数：AAA ×0.6、CCC ×0.8、DDD ×1.0、EEE ×1.3、BBB ×1.8，体量越小越宽。默认参数下市价价差：AAA 约 $0.66，其余在 $1.9 到 $9.3 之间。10,000 股时 BBB（约 $862）的价差约 $211，AAA（约 $183）约 $15。行情表的 Bid/Ask 会按下单区输入的数量变化，数量留空时显示市价，价差单位是价格。评分没有同场对手可比，用的是固定基准，与真实平台的百分位分数不会完全一致。</p>
+  </details>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const f2=x=>x.toFixed(2);
+const fi=x=>Math.round(x).toLocaleString('en-US');
+const fm=x=>(Math.round(x)<0?'−':Math.round(x)>0?'+':'')+'$'+fi(Math.abs(x));
+const fq=x=>(x>0?'+':x<0?'−':'')+fi(Math.abs(x));
+const r2=x=>Math.round(x*100)/100;
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const rnd=(a,b)=>a+Math.random()*(b-a);
+function gauss(){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+const DEF=[{s:'AAA',p:183,m:0.6},{s:'BBB',p:862,m:1.8},{s:'CCC',p:490,m:0.8},{s:'DDD',p:312,m:1.0},{s:'EEE',p:238,m:1.3}];
+const CLIENTS=['Harbor AM','Northgate Capital','Lumen Partners','Kestrel Fund','Oakline AM'];
+const SIZES=[1000,1500,2000,2500,3000,4000,5000,6000,7500,8000,10000];
+const ASKS=[(q,s)=>`Hi, can I get a two-way price in ${q} ${s}?`,(q,s)=>`Two-way in ${s} please, ${q} shares.`,(q,s)=>`Looking for a market in ${q} ${s}.`,(q,s)=>`Can you show me a price in ${s}? Size is ${q}.`];
+const NEWS=[
+ {t:'AAA announces major investment in self-driving AI',fx:[['AAA',2.5]]},
+ {t:'CCC earnings: subscriber losses worse than expected',fx:[['CCC',-3]]},
+ {t:'DDD staff confirm walkouts over wage dispute',fx:[['DDD',-2]]},
+ {t:'BBB signs partnership with AI drug-discovery firm',fx:[['BBB',2.2]]},
+ {t:'Regulator to review language certification standards',fx:[['EEE',-2.5]]},
+ {t:'EEE reports record user activity after new AI tools',fx:[['EEE',2]]},
+ {t:'US CPI comes in below expectations',fx:[['AAA',.7],['CCC',.6],['EEE',.8],['DDD',.3],['BBB',.4]]},
+ {t:'AAA earnings miss as deliveries slow',fx:[['AAA',-2.8]]}
+];
+const NOTES={
+ drill:'连续 20 个询价，只练报价，不用对冲。每题 30 秒，报完立刻看到 Mid、参考报价和你的偏差。',
+ hedge:'开局给你三笔大头寸，3 分钟内在交易所平掉。目标是冲击成本低，同时平得快。',
+ full:'客户询价、交易所对冲、新闻冲击同时进行，结束后按六项评分。新询价会排队，按先来先答的顺序处理。'
+};
+
+let cfg={commBps:25,spreadBps:60,impactBps:65,volBps:8,qLim:60,dur:600,aid:true};
+const imp=(st,q)=>cfg.impactBps*st.m*q/1000;
+let mode='full';
+let G=null;
+let stocks=DEF.map(d=>({s:d.s,m:d.m,mid:d.p,prev:d.p,press:0,pos:0,avg:0,real:0}));
+let sel=stocks[0];
+const rows={};
+
+function loadCfg(){try{const c=JSON.parse(localStorage.getItem('ibdesk.cfg5')||'null');if(c){cfg=Object.assign(cfg,c);}}catch(e){}
+  $('sComm').value=cfg.commBps;$('sSpread').value=cfg.spreadBps;$('sImpact').value=cfg.impactBps;$('sVol').value=cfg.volBps;$('sLim').value=cfg.qLim;$('sDur').value=String(cfg.dur);$('sAid').checked=!!cfg.aid;}
+function readCfg(){
+  const n=(id,d,lo,hi)=>{const v=parseFloat($(id).value);return isFinite(v)?clamp(v,lo,hi):d;};
+  cfg.commBps=n('sComm',25,0,200);cfg.spreadBps=n('sSpread',60,2,5000);cfg.impactBps=n('sImpact',65,0,500);cfg.volBps=n('sVol',8,0,200);cfg.qLim=n('sLim',60,10,300);
+  cfg.dur=parseInt($('sDur').value,10)||600;cfg.aid=$('sAid').checked;
+  try{localStorage.setItem('ibdesk.cfg5',JSON.stringify(cfg));}catch(e){}
+}
+
+const half=st=>st.mid*cfg.spreadBps*st.m/2/1e4;
+const exBid=st=>r2(st.mid*(1+st.press/1e4)-half(st));
+const exAsk=st=>r2(st.mid*(1+st.press/1e4)+half(st));
+const pnlOf=st=>st.real+st.pos*(st.mid-st.avg);
+
+function applyFill(st,q,px){
+  if(st.pos===0||Math.sign(st.pos)===Math.sign(q)){
+    st.avg=(st.avg*Math.abs(st.pos)+px*Math.abs(q))/(Math.abs(st.pos)+Math.abs(q));st.pos+=q;
+  }else{
+    const close=Math.min(Math.abs(q),Math.abs(st.pos));
+    st.real+=close*(px-st.avg)*Math.sign(st.pos);
+    const rem=Math.abs(q)-close;st.pos+=q;
+    if(rem>0)st.avg=px;else if(st.pos===0)st.avg=0;
+  }
+}
+
+/* ---------- build static rows ---------- */
+function build(){
+  const mb=$('mktBody'),bb=$('bookBody');
+  stocks.forEach(st=>{
+    const tr=document.createElement('tr');tr.dataset.s=st.s;tr.tabIndex=0;
+    tr.innerHTML='<td></td><td></td><td></td><td></td><td></td>';tr.children[0].textContent=st.s;mb.appendChild(tr);
+    const tb=document.createElement('tr');tb.innerHTML='<td></td><td></td><td></td><td></td>';tb.children[0].textContent=st.s;bb.appendChild(tb);
+    rows[st.s]={m:tr,b:tb};
+  });
+  mb.addEventListener('click',e=>{const tr=e.target.closest('tr');if(tr)select(tr.dataset.s);});
+  mb.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const tr=e.target.closest('tr');if(tr){e.preventDefault();select(tr.dataset.s);}}});
+}
+function select(s){sel=stocks.find(x=>x.s===s)||sel;render();}
+
+/* ---------- chat ---------- */
+function addMsg(kind,who,text,html){
+  const d=document.createElement('div');d.className='msg '+kind;
+  if(who){const sm=document.createElement('small');sm.textContent=who;d.appendChild(sm);}
+  const sp=document.createElement('span');if(html)sp.innerHTML=text;else sp.textContent=text;d.appendChild(sp);
+  const st=$('stream');st.appendChild(d);st.scrollTop=st.scrollHeight;
+}
+function addLog(html){const d=document.createElement('div');d.innerHTML=html;const l=$('log');l.prepend(d);}
+
+/* ---------- session ---------- */
+function resetStocks(){stocks.forEach((st,i)=>{st.mid=DEF[i].p;st.prev=st.mid;st.press=0;st.tr=0;st.pos=0;st.avg=0;st.real=0;});}
+function start(){
+  readCfg();resetStocks();
+  $('stream').innerHTML='';$('log').innerHTML='';$('score').hidden=true;$('news').hidden=true;
+  G={running:true,t:0,acc:0,last:performance.now(),rfq:null,queue:[],seq:0,rfqs:[],nextRfqAt:mode==='drill'?1:rnd(6,12),
+     comm:0,ff:0,edge:0,spreadCost:0,impactCost:0,expInt:0,clientShares:0,worst:0,worstImp:0,exOrders:[],addOrders:0,
+     news:[],dur:mode==='full'?cfg.dur:mode==='hedge'?180:0,drillN:20,startShares:0};
+  if(mode==='full'){
+    const pool=NEWS.slice().sort(()=>Math.random()-.5).slice(0,4);
+    [.15,.36,.57,.78].forEach((f,i)=>G.news.push({at:G.dur*(f+rnd(-.04,.04)),n:pool[i]}));
+    addMsg('sys','','模拟开始。客户会陆续询价，成交后记得去交易所拆单平仓。');
+  }else if(mode==='hedge'){
+    const three=stocks.slice().sort(()=>Math.random()-.5).slice(0,3);
+    three.forEach(st=>{const q=pick([6000,8000,10000])*(Math.random()<.5?1:-1);const a=Math.abs(q),Hq=half(st)+st.mid*imp(st,a)/1e4;
+      st.pos=q;st.avg=r2(st.mid-Math.sign(q)*rnd(.3,.7)*Hq);G.edge+=q*(st.mid-st.avg);G.startShares+=a;
+      G.worst+=a*Hq;G.worstImp+=a*st.mid*imp(st,a)/1e4;});
+    sel=three[0];
+    addMsg('sys','','你刚接了三笔客户大单，头寸和成本价见右侧，成本是你给客户的成交价。多头要卖出，空头要买入。卖出价高于成本、买回价低于成本就是赚的。股价会涨跌，对你有利时抓紧平，不利时也别一直拖。把每笔头寸拆成 4 到 5 笔，两笔之间隔两三秒让价格恢复。');
+  }else{
+    addMsg('sys','','速算开始。口诀：Mid = (Bid + Ask) ÷ 2，报 Mid ± H/2。数量越大、体量越小，H 越宽，所以大单要比行情表上的价差报得更宽。');
+  }
+  setUi();render();
+}
+function setUi(){
+  const run=!!(G&&G.running);
+  $('startBtn').hidden=run;$('endBtn').hidden=!run;
+  document.querySelectorAll('.modes button').forEach(b=>{b.disabled=run;b.setAttribute('aria-selected',String(b.dataset.mode===mode));});
+  $('modeNote').textContent=NOTES[mode];
+  $('mktPanel').classList.toggle('off',run&&mode==='drill');
+  $('quoteBox').classList.toggle('off',run&&mode==='hedge');
+  if(!run){$('clock').textContent=mode==='full'?mmss(parseInt($('sDur').value,10)):mode==='hedge'?'03:00':'20 题';}
+}
+const mmss=s=>{s=Math.max(0,Math.ceil(s));return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');};
+
+function tick(){
+  const now=performance.now();
+  if(!G||!G.running){return;}
+  const dt=Math.min(1,(now-G.last)/1000);G.last=now;G.t+=dt;G.acc+=dt;
+  const vol=cfg.volBps/1e4*(mode==='drill'?0.4:1);
+  while(G.acc>=1){G.acc-=1;stocks.forEach(st=>{st.prev=st.mid;st.tr=0.94*(st.tr||0)+0.25*gauss();st.mid*=1+(0.3*st.tr+gauss())*vol*st.m;});}
+  let exp=0;stocks.forEach(st=>{st.press*=Math.pow(0.5,dt/3);exp+=Math.abs(st.pos);});
+  G.expInt+=exp*dt;
+  while(G.news.length&&G.t>=G.news[0].at){fireNews(G.news.shift().n);}
+  if(G.rfq&&G.t>=G.rfq.deadline)timeoutRfq();
+  G.queue=G.queue.filter(r=>{if(G.t>=r.deadline){expire(r);G.rfqs.push(r);return false;}return true;});
+  if(mode==='drill'){if(!G.rfq&&G.t>=G.nextRfqAt&&G.rfqs.length<G.drillN)newRfq();}
+  else if(mode==='full'&&G.t>=G.nextRfqAt){
+    if(G.t<G.dur-cfg.qLim-2&&G.queue.length<4)newRfq();
+    G.nextRfqAt=G.t+rnd(15,32);
+  }
+  if(mode==='full'&&G.t>=G.dur)return end();
+  if(mode==='hedge'&&(G.t>=G.dur||exp===0))return end();
+  if(mode==='drill'&&!G.rfq&&G.rfqs.length>=G.drillN&&G.t>=G.nextRfqAt)return end();
+  render();
+}
+function fireNews(n){
+  n.fx.forEach(([s,p])=>{const st=stocks.find(x=>x.s===s);st.prev=st.mid;st.mid*=1+p/100;});
+  $('news').hidden=false;$('newsTxt').textContent=n.t;
+  addMsg('newsm','NEWS · '+mmss(G.dur-G.t),n.t);
+}
+
+/* ---------- RFQ ---------- */
+function newRfq(){
+  const st=pick(stocks),size=pick(SIZES);
+  const r={n:++G.seq,client:pick(CLIENTS),st,size,dir:Math.random()<.5?1:-1,T:rnd(.45,1),t0:G.t,lim:mode==='drill'?30:cfg.qLim,deadline:G.t+(mode==='drill'?30:cfg.qLim),mid0:st.mid,status:'open'};
+  addMsg('client',r.client,pick(ASKS)(fi(size),st.s));
+  if(G.rfq)G.queue.push(r);else activate(r);
+}
+function activate(r){
+  G.rfq=r;
+  ['bidIn','askIn'].forEach(id=>{$(id).disabled=false;$(id).value='';});$('sendBtn').disabled=false;$('qErr').textContent='';
+  if(document.activeElement!==$('qtyIn'))$('bidIn').focus();
+}
+function closeRfq(r){
+  G.rfqs.push(r);G.rfq=null;if(mode==='drill')G.nextRfqAt=G.t+2.5;
+  if(G.queue.length)activate(G.queue.shift());
+  else{['bidIn','askIn'].forEach(id=>{$(id).disabled=true;$(id).value='';});$('sendBtn').disabled=true;}
+}
+function expire(r){r.status='timeout';r.resp=r.lim;addMsg('client',r.client,"No price? I'll go elsewhere.");}
+function timeoutRfq(){const r=G.rfq;expire(r);closeRfq(r);}
+function submitQuote(){
+  const r=G&&G.rfq;if(!r)return;
+  const bid=parseFloat($('bidIn').value),ask=parseFloat($('askIn').value);
+  if(!(bid>0)||!(ask>0)){$('qErr').textContent='请填写 Bid 和 Ask 两个价格。';return;}
+  const st=r.st,mid=st.mid,H=half(st),xb=exBid(st),xa=exAsk(st);
+  const lim=Math.max(mid*0.03,2*(H+mid*imp(st,r.size)/1e4));
+  let err='';
+  if(bid>=ask)err='Bid 不低于 Ask，买卖价写反了';
+  else if(Math.abs(bid-mid)>lim||Math.abs(ask-mid)>lim)err='价格离 Mid 太远，超过了该数量价差的两倍';
+  else if(bid>=xa||ask<=xb)err='报价穿越了交易所价格';
+  const Hq=H+mid*imp(st,r.size)/1e4;
+  r.bid=bid;r.ask=ask;r.mid=mid;r.H=Hq;r.H0=H;r.resp=G.t-r.t0;r.dB=(mid-bid)/Hq;r.dA=(ask-mid)/Hq;r.err=err;
+  if(err)G.ff++;
+  const px=r.dir>0?ask:bid,dist=r.dir>0?r.dA:r.dB,win=dist<=r.T;
+  addMsg('me','你的报价 → '+r.client+'（'+fi(r.size)+' '+st.s+'）',f2(bid)+' / '+f2(ask));
+  if(win){
+    r.status='won';r.px=px;r.comm=r.size*px*cfg.commBps/1e4;r.edge=dist*Hq*r.size;
+    G.comm+=r.comm;G.edge+=r.edge;
+    if(mode!=='drill'){
+      applyFill(st,-r.dir*r.size,px);G.clientShares+=r.size;
+      G.worst+=r.size*(H+mid*imp(st,r.size)/1e4);G.worstImp+=r.size*mid*imp(st,r.size)/1e4;
+      addLog(`<b>客户</b> ${r.dir>0?'你卖出':'你买入'} ${fi(r.size)} ${st.s} @ ${f2(px)}`);
+    }
+    addMsg('client',r.client,r.dir>0?`Done. I buy ${fi(r.size)} ${st.s} at ${f2(px)}.`:`Done. I sell ${fi(r.size)} ${st.s} at ${f2(px)}.`);
+  }else{
+    r.status='lost';addMsg('client',r.client,"Thanks, but I've got a better price elsewhere.");
+  }
+  if(cfg.aid||mode==='drill')feedback(r,win);
+  closeRfq(r);
+}
+function feedback(r,win){
+  const H=r.H,mid=r.mid,k=cfg.impactBps;
+  let h=`Mid <b class="num">${f2(mid)}</b>，${fi(r.size)} 股的 H <b class="num">${f2(H)}</b>，参考 <b class="num">${f2(mid-H/2)} / ${f2(mid+H/2)}</b>。你的 Bid 距 Mid ${r.dB.toFixed(2)}H，Ask 距 Mid ${r.dA.toFixed(2)}H，用时 ${r.resp.toFixed(0)} 秒。`;
+  if(r.err)h+=`<br><span class="neg">失误：${r.err}。</span>`;
+  else if(r.dB<0||r.dA<0)h+=`<br><span class="neg">有一边穿过了 Mid，等于白送钱。</span>`;
+  else if(!win)h+=`<br>客户想${r.dir>0?'买':'卖'}，你这一边报得比对手宽。`;
+  if(win&&mode!=='drill'){
+    const one=r.size*(r.H0+mid*imp(r.st,r.size)/1e4),sl=r.size*(r.H0+mid*imp(r.st,r.size/5)/1e4);
+    h+=`<br>佣金 ${fm(r.comm)}，报价价差 ${fm(r.edge)}。对冲成本估算：一笔平完 ${fm(-one)}，拆成 5 笔并留出间隔 ${fm(-sl)}。`;
+  }
+  addMsg('sys','',h,true);
+}
+
+/* ---------- exchange ---------- */
+function exOrder(side){
+  if(!G||!G.running||mode==='drill')return;
+  const st=sel,q=parseInt(String($('qtyIn').value).replace(/,/g,''),10);
+  if(!(q>0)){$('xErr').textContent='请输入股数。';return;}
+  if(q>50000){$('xErr').textContent='单笔上限 50,000 股。';return;}
+  $('xErr').textContent='';
+  const own=imp(st,q),base=side>0?exAsk(st):exBid(st),fill=r2(base*(1+side*own/1e4)),H=half(st);
+  const reduces=st.pos!==0&&Math.sign(st.pos)!==side&&q<=Math.abs(st.pos);
+  if(!reduces)G.addOrders++;
+  applyFill(st,side*q,fill);
+  const tot=side*(fill-st.mid)*q;G.spreadCost-=H*q;G.impactCost-=Math.max(0,tot-H*q);
+  st.press+=side*own*0.3;G.exOrders.push({q,s:st.s});
+  addLog(`<b>交易所</b> ${side>0?'买入':'卖出'} ${fi(q)} ${st.s} @ ${f2(fill)}${reduces?'':' <span class="neg">加仓</span>'}`);
+  render();
+}
+
+/* ---------- render ---------- */
+function cls(el,v){el.classList.toggle('pos',v>0.5);el.classList.toggle('neg',v<-0.5);}
+function render(){
+  let pnl=0,exp=0;
+  const qv=parseInt(String($('qtyIn').value).replace(/,/g,''),10),hasQv=qv>0;
+  $('mktCap').textContent=hasQv?'按 '+fi(qv)+' 股显示':'市价';
+  stocks.forEach(st=>{
+    const m=rows[st.s].m.children,b=rows[st.s].b.children,p=pnlOf(st);pnl+=p;exp+=Math.abs(st.pos);
+    const ow=hasQv?imp(st,qv):0,db=exBid(st)*(1-ow/1e4),da=exAsk(st)*(1+ow/1e4);
+    m[1].textContent=f2(db);m[2].textContent=f2(da);m[3].textContent=f2(da-db);m[4].textContent=st.pos?fq(st.pos):'—';
+    cls(m[4],st.pos);rows[st.s].m.classList.toggle('sel',st===sel);
+    b[1].textContent=st.pos?fq(st.pos):'—';b[2].textContent=st.pos?f2(st.avg):'—';b[3].textContent=fm(p);cls(b[3],p);
+  });
+  const run=G&&G.running;
+  if(G){
+    const drill=mode==='drill';
+    $('kComm').textContent='$'+fi(G.comm);
+    $('kPnl').textContent=drill?'—':fm(pnl);cls($('kPnl'),drill?0:pnl);
+    const net=G.comm+(drill?0:pnl);$('kNet').textContent=fm(net);cls($('kNet'),net);
+    $('kCt').textContent=G.rfqs.filter(r=>r.status==='won').length+' / '+(G.rfqs.length+(G.rfq?1:0)+G.queue.length);
+    $('kFf').textContent=G.ff;cls($('kFf'),-G.ff);
+    $('kExp').textContent=fi(exp);
+    if(run)$('clock').textContent=drill?('第 '+Math.min(G.drillN,G.rfqs.length+(G.rfq?1:0))+'/'+G.drillN):mmss(G.dur-G.t);
+  }
+  $('selName').textContent=sel.s;
+  $('posHint').textContent=sel.pos>0?`当前多头 ${fi(sel.pos)} 股，成本 ${f2(sel.avg)}，平仓要卖出。`:sel.pos<0?`当前空头 ${fi(-sel.pos)} 股，成本 ${f2(sel.avg)}，平仓要买入。`:'当前没有持仓。';
+  $('estHint').textContent=hasQv?'行情表已按 '+fi(qv)+' 股显示，成交价就是表里的 Bid/Ask。':'输入数量后，行情表会显示该数量的 Bid/Ask。';
+  const r=G&&G.rfq;
+  $('queueLine').textContent=G&&G.queue.length?'排队中 '+G.queue.length+' 个：'+G.queue.map(x=>fi(x.size)+' '+x.st.s+'（剩 '+Math.max(0,Math.ceil(x.deadline-G.t))+'s）').join('，'):'';
+  if(r){
+    const left=r.deadline-G.t;$('rfqTitle').textContent=`${r.client}：${fi(r.size)} 股 ${r.st.s}，双边价`;
+    $('rfqLeft').textContent=Math.ceil(left)+'s';$('rfqBar').style.width=clamp(left/r.lim*100,0,100)+'%';$('rfqBar').classList.toggle('late',left<10);
+    if(cfg.aid){const st=r.st,H=half(st)+st.mid*imp(st,r.size)/1e4,sk=mode==='drill'?0:st.pos>0?-H/5:st.pos<0?H/5:0;
+      $('aid').innerHTML=`交易所 <b>${f2(exBid(st))} / ${f2(exAsk(st))}</b>　Mid <b>${f2(st.mid)}</b>　${fi(r.size)} 股的 H <b>${f2(H)}</b>　参考 <b>${f2(st.mid-H/2+sk)} / ${f2(st.mid+H/2+sk)}</b>${sk?'（已按持仓偏移 H/5）':''}`;}
+    else $('aid').textContent='';
+  }else{
+    $('rfqTitle').textContent=run&&mode!=='hedge'?'等待下一位客户':mode==='hedge'?'本模式没有客户询价':'等待客户询价';
+    $('rfqLeft').textContent='';$('rfqBar').style.width='0%';$('aid').textContent='';
+  }
+}
+
+/* ---------- scoring ---------- */
+function end(){
+  if(!G)return;G.running=false;
+  if(G.rfq){['bidIn','askIn'].forEach(id=>{$(id).disabled=true;$(id).value='';});$('sendBtn').disabled=true;G.rfq=null;}
+  G.queue=[];
+  setUi();render();score();
+}
+function score(){
+  const R=G.rfqs,won=R.filter(r=>r.status==='won');
+  const maxComm=R.reduce((a,r)=>a+r.size*r.mid0*cfg.commBps/1e4,0);
+  const pnl=stocks.reduce((a,st)=>a+pnlOf(st),0),open=stocks.reduce((a,st)=>a+Math.abs(st.pos),0);
+  const drift=pnl-G.edge-G.spreadCost-G.impactCost;
+  const sumQ=G.exOrders.reduce((a,o)=>a+o.q,0),avgSlice=sumQ?G.exOrders.reduce((a,o)=>a+o.q*o.q,0)/sumQ:0;
+  const shares=mode==='hedge'?G.startShares:G.clientShares,hold=shares?G.expInt/shares:0;
+  const hasQ=mode!=='hedge',hasH=mode!=='drill';
+  const S=[];
+  const sComm=maxComm?100*G.comm/maxComm:0;
+  S.push(['1. COMM 佣金',hasQ?sComm:null,hasQ?`赚到 $${fi(G.comm)}，全部成交的上限约 $${fi(maxComm)}。`:'']);
+  const sCt=R.length?100*won.length/R.length:0,to=R.filter(r=>r.status==='timeout').length;
+  S.push(['2. CT 聊天成交',hasQ?sCt:null,hasQ?`${R.length} 个询价成交 ${won.length} 个${to?`，超时 ${to} 个`:''}。客户的底线在 0.45H 到 1H 之间，报 0.5H 大约九成能成交，H 按询价数量计算。`:'']);
+  const impR=G.worstImp?-G.impactCost/G.worstImp:0;
+  const sLiq=sumQ?100*clamp((1-impR)/0.75,0,1):(shares?0:100);
+  S.push(['3. 流动性风险',hasH?sLiq:null,hasH?(sumQ?`共 ${G.exOrders.length} 笔交易所订单，平均单笔 ${fi(sumQ/G.exOrders.length)} 股。付出的冲击成本是一次性平仓的 ${(100*impR).toFixed(0)}%，25% 以内为满分，相当于每笔头寸拆成 4 笔以上并留出间隔。`:'没有在交易所下过单。'):'']);
+  const sFf=clamp(100-20*G.ff,0,100);
+  S.push(['4. FFC 报价失误',hasQ?sFf:null,hasQ?(G.ff?`${G.ff} 次失误，每次扣 20 分。发送前看一眼 Bid < Ask，小数点位置对不对。`:'零失误。'):'']);
+  const sPnl=G.worst?100*clamp(1+pnl/G.worst,0,1):(pnl>=0?100:0);
+  S.push(['5. PnL',hasH?sPnl:null,hasH?`Total PnL ${fm(pnl)}。0 分基准是每笔头寸一次性砸到交易所的损失 ${fm(-G.worst)}，不亏为满分。`:'']);
+  const sHold=shares?100*clamp((120-hold)/100,0,1):100;
+  S.push(['6. 平仓效率',hasH?sHold:null,hasH?(shares?`每股风险平均在账上停留 ${hold.toFixed(0)} 秒，结束时还剩 ${fi(open)} 股没平。20 秒以内为满分。`:'没有需要平的头寸。'):'']);
+
+  const live=S.filter(x=>x[1]!==null),avg=live.reduce((a,x)=>a+x[1],0)/live.length;
+  let h=`<div class="scoreHead"><h3>本局评分</h3><span class="num">平均 ${avg.toFixed(0)} 分</span></div><div>`;
+  S.forEach(([nm,sc,tip])=>{
+    h+=`<div class="srow"><span class="nm">${nm}</span><span class="sc">${sc===null?'—':sc.toFixed(0)}</span><div class="meter"><i style="width:${sc===null?0:sc}%"></i></div><span class="tip">${sc===null?'本模式不练这一项。':tip}</span></div>`;
+  });
+  h+='</div>';
+  if(hasH){
+    const net=G.comm+pnl;
+    h+=`<h2>钱从哪来，花到哪去</h2><div class="decomp">
+      <div><span>佣金</span><b class="${G.comm>0?'pos':''}">${fm(G.comm)}</b></div>
+      <div><span>报价价差收入</span><b class="${G.edge<0?'neg':'pos'}">${fm(G.edge)}</b></div>
+      <div><span>对冲：交易所半价差</span><b class="neg">${fm(G.spreadCost)}</b></div>
+      <div><span>对冲：冲击成本</span><b class="neg">${fm(G.impactCost)}</b></div>
+      <div><span>持仓期间价格变动</span><b class="${drift<0?'neg':'pos'}">${fm(drift)}</b></div>
+      <div><span>净结果</span><b class="${net<0?'neg':'pos'}">${fm(net)}</b></div></div>
+      <p class="fine" style="margin:0">PnL = 报价价差 + 两项对冲成本 + 持仓期间价格变动。${G.addOrders?`有 ${G.addOrders} 笔交易所订单是加仓或平过头，检查一下买卖方向。`:''}冲击成本可以靠拆单压低，半价差躲不掉，所以佣金加报价价差必须盖过它。</p>`;
+  }
+  if(hasQ&&R.length){
+    const rs=R.filter(r=>r.status!=='timeout'),ar=rs.length?rs.reduce((a,r)=>a+r.resp,0)/rs.length:0;
+    h+=`<h2>逐笔复盘 · 平均用时 ${ar.toFixed(0)} 秒</h2><div class="scroll"><table><thead><tr><th>#</th><th>股票</th><th>数量</th><th>Mid</th><th>你的报价</th><th>Bid 距 Mid</th><th>Ask 距 Mid</th><th>用时</th><th>佣金</th><th>结果</th></tr></thead><tbody>`;
+    R.forEach(r=>{
+      const tag=r.err?'<span class="tag e">失误</span>':r.status==='won'?'<span class="tag w">成交</span>':r.status==='timeout'?'<span class="tag e">超时</span>':'<span class="tag l">未成交</span>';
+      h+=r.status==='timeout'?`<tr><td>${r.n}</td><td>${r.st.s}</td><td>${fi(r.size)}</td><td>${f2(r.mid0)}</td><td>—</td><td>—</td><td>—</td><td>${r.lim}s</td><td>—</td><td>${tag}</td></tr>`
+       :`<tr><td>${r.n}</td><td>${r.st.s}</td><td>${fi(r.size)}</td><td>${f2(r.mid)}</td><td>${f2(r.bid)} / ${f2(r.ask)}</td><td>${r.dB.toFixed(2)}H</td><td>${r.dA.toFixed(2)}H</td><td>${r.resp.toFixed(0)}s</td><td>${r.comm?'$'+fi(r.comm):'—'}</td><td>${tag}${r.err&&r.status==='won'?' <span class="tag w">成交</span>':''}</td></tr>`;
+    });
+    h+='</tbody></table></div>';
+  }
+  const el=$('score');el.innerHTML=h;el.hidden=false;
+  try{el.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});}catch(e){}
+}
+
+/* ---------- wiring ---------- */
+build();loadCfg();setUi();
+addMsg('sys','','选一个模式，点“开始”。下面是一段示例对话，开始后会清空。');
+addMsg('client','Harbor AM（示例）','Hi, can I get a two-way price in 5,000 AAA?');
+addMsg('me','你的报价（示例）','181.05 / 184.95');
+addMsg('client','Harbor AM（示例）','Done. I buy 5,000 AAA at 184.95.');
+addMsg('sys','','示例里你卖出了 5,000 股，变成空头。接下来要去交易所分几笔买回来。');
+render();
+
+document.querySelectorAll('.modes button').forEach(b=>b.addEventListener('click',()=>{if(G&&G.running)return;mode=b.dataset.mode;setUi();}));
+$('sDur').addEventListener('change',setUi);
+$('sAid').addEventListener('change',()=>{cfg.aid=$('sAid').checked;render();});
+$('startBtn').addEventListener('click',start);
+$('endBtn').addEventListener('click',end);
+$('sendBtn').addEventListener('click',submitQuote);
+$('bidIn').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('askIn').focus();}});
+$('askIn').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();submitQuote();}});
+$('buyBtn').addEventListener('click',()=>exOrder(1));
+$('sellBtn').addEventListener('click',()=>exOrder(-1));
+$('qtyIn').addEventListener('input',render);
+$('qtyChips').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  const ap=Math.abs(sel.pos);
+  $('qtyIn').value=b.dataset.q==='all'?(ap?String(ap):''):b.dataset.q==='q4'?(ap?String(Math.max(100,Math.round(ap/4/100)*100)):''):b.dataset.q;render();});
+setInterval(tick,250);
+})();
+</script>
+</body>
+</html>
